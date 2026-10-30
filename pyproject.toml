@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "Auditoria independente dos dados públicos das urnas (TSE) — Eleições 2026"
 requires-python = ">=3.12"
 dependencies = [
+    "asn1tools>=0.169.0",
+    "cryptography>=50.0.2",
     "duckdb>=2.0.0",
     "httpx>=0.28.1",
+    "py7zr>=1.1.4",
     "pyarrow>=26.0.0",
 ]
 

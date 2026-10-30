@@ -1,0 +1,17 @@
+[project]
+name = "auditoria-urnas"
+version = "0.1.0"
+description = "Auditoria independente dos dados públicos das urnas (TSE) — Eleições 2026"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=2.0.0",
+    "httpx>=0.28.1",
+    "pyarrow>=26.0.0",
+]
+
+[project.scripts]
+auditoria-urnas = "auditoria_urnas:main"
+
+[build-system]
+requires = ["uv_build>=0.12.20,<0.13.0"]
+build-backend = "uv_build"

@@ -11,6 +11,11 @@ data/lake/urna_<tabela>/turno=<t>/uf=<UF>/part.parquet:
   log_votos    horário (local) de cada "O voto do eleitor foi computado" no dia
   log_msgs     contagem por seção de cada mensagem do log no dia (normalizada)
   log_alertas  linhas ALERTA/ERRO do dia, texto com números longos removidos
+  mesarios     por seção e mesário (apelido M1, M2... só válido dentro da seção):
+               quantos eleitores liberou manualmente, se registrou, se encerrou
+
+log_votos traz, para cada voto, a forma de habilitação do eleitor
+(biometria / manual_mesario / sem_biometria) e o apelido do mesário que liberou.
 
 Dados pessoais: números com 11+ dígitos (título de eleitor, CPF de mesários)
 são substituídos por <ID> antes de qualquer gravação.
@@ -21,6 +26,7 @@ Uso: python -m auditoria_urnas.urnas <zip> [<zip> ...]
 import hashlib
 import io
 import re
+import shutil
 import sys
 import zipfile
 from collections import Counter, defaultdict
@@ -61,6 +67,10 @@ def normaliza(msg: str) -> str:
     return s
 
 
+def hexa(v):
+    return bytes(v).hex() if isinstance(v, (bytes, bytearray)) else v
+
+
 # ---------- BU ----------
 
 def ler_bu(dados: bytes, chave: dict) -> tuple[dict, list[dict]]:
@@ -84,8 +94,8 @@ def ler_bu(dados: bytes, chave: dict) -> tuple[dict, list[dict]]:
         "tipo_arquivo": urna["tipoArquivo"],
         "versao_votacao": urna.get("versaoVotacao"),
         "nr_urna": carga["numeroInternoUrna"],
-        "serie_fv": urna.get("numeroSerieFV"),
-        "serie_fc": carga["numeroSerieFC"],
+        "serie_fv": hexa(urna.get("numeroSerieFV")),
+        "serie_fc": hexa(carga["numeroSerieFC"]),
         "codigo_carga": carga["codigoCarga"],
         "data_carga": ts(carga["dataHoraCarga"]),
         "gerador_midia": carga["identificadorGeradorMidia"]["nome"],
@@ -201,54 +211,177 @@ def membros_log(dados: bytes, caminho: str = ""):
                 yield f"{caminho}{nome}", conteudo.decode("latin-1")
 
 
+def hora(s: str) -> datetime:
+    # 'dd/mm/aaaa hh:mm:ss' (strptime é ~10x mais lento)
+    return datetime(int(s[6:10]), int(s[3:5]), int(s[0:2]), int(s[11:13]), int(s[14:16]), int(s[17:19]))
+
+
+MESARIO = re.compile(r"[Mm]esário (\d{11,})")
+
+
+class Ciclo:
+    """Estado da habilitação do eleitor corrente, por urna (o log é sequencial)."""
+    __slots__ = ("manual", "biometrica", "ano_nasc", "mesario", "tentativas", "inicio")
+
+    def __init__(self, inicio=None):
+        self.manual = self.biometrica = self.ano_nasc = False
+        self.mesario = None
+        self.tentativas = 0
+        self.inicio = inicio
+
+    def tipo(self) -> str:
+        if self.manual:
+            return "manual_mesario"      # tinha biometria, digital falhou, mesário liberou (BU: biografia)
+        if self.biometrica:
+            return "biometria"
+        if self.ano_nasc:
+            return "sem_biometria"       # sem biometria cadastrada, conferido ano de nascimento
+        return "indeterminado"
+
+
 def ler_log(dados: bytes, chave: dict, turno: str):
     dia = DIA[turno]
     votos, alertas = [], []
     msgs = defaultdict(lambda: [0, None, None])
-    vistas = set()  # a mesma linha pode aparecer em mais de um pacote: chave = urna + autenticador
+    vistas = set()  # a mesma linha pode aparecer em mais de um pacote: chave = urna + hora + autenticador
+    pseud: dict[str, str] = {}  # título do mesário -> M1, M2... (só dentro da seção; o título nunca é gravado)
+    mes = defaultdict(lambda: {"habilitou": 0, "registrado": False, "eleitor_da_secao": None,
+                               "encerrou": False, "primeiro": None, "ultimo": None})
+    ciclos: dict[str, Ciclo] = {}
+
+    def apelido(titulo: str) -> str:
+        if titulo not in pseud:
+            pseud[titulo] = f"M{len(pseud) + 1}"
+        return pseud[titulo]
+
     for membro, texto in membros_log(dados):
-        for linha in texto.splitlines():
+        i = texto.find(dia)
+        if i < 0:
+            continue
+        for linha in texto[i:].splitlines():
+            if not linha.startswith(dia):
+                continue
             p = linha.split("\t")
-            if len(p) < 6 or not p[0].startswith(dia):
+            if len(p) < 6:
                 continue
             k_linha = (p[2], p[0], p[5])
             if k_linha in vistas:
                 continue
             vistas.add(k_linha)
-            quando = datetime.strptime(p[0], "%d/%m/%Y %H:%M:%S")
+            quando = hora(p[0])
             nivel, urna, app, msg = p[1], p[2], p[3], p[4]
-            if msg == "O voto do eleitor foi computado":
-                votos.append({**chave, "urna_log": urna, "membro": membro, "horario_local": quando})
+            if app == "VOTA":
+                c = ciclos.get(urna)
+                if msg.startswith("Aguardando digitação do identificador") or c is None:
+                    c = ciclos[urna] = Ciclo(quando)
+                if msg.startswith("Tipo de habilitação do eleitor [biom"):
+                    c.biometrica = True
+                elif msg.startswith("Solicitação de dado pessoal do eleitor para habilitação manual"):
+                    c.manual = True
+                elif msg.startswith("Ano de nascimento digitado é igual"):
+                    c.ano_nasc = True
+                elif msg.startswith("Capturada a digital. Tentativa"):
+                    c.tentativas += 1
+                elif msg.startswith("Digital coletada bate com uma digital gravada após"):
+                    c.mesario = "nao_associavel"
+                elif msg.startswith("Não encontrou digital coletada"):
+                    c.mesario = "digital_nova"
+                m = MESARIO.search(msg)
+                if m:
+                    a = apelido(m[1])
+                    d = mes[a]
+                    d["primeiro"] = d["primeiro"] or quando
+                    d["ultimo"] = quando
+                    if "habilitou o eleitor" in msg:
+                        d["habilitou"] += 1
+                        c.mesario = a
+                    elif msg.endswith("registrado"):
+                        d["registrado"] = True
+                    elif "não é eleitor da seção" in msg:
+                        d["eleitor_da_secao"] = False
+                    elif "é eleitor da seção" in msg:
+                        d["eleitor_da_secao"] = True
+                elif msg.startswith("Título digitado para encerramento"):
+                    t = ID_LONGO.search(msg)
+                    if t and t[0] in pseud:
+                        mes[pseud[t[0]]]["encerrou"] = True
+                if msg == "O voto do eleitor foi computado":
+                    votos.append({**chave, "urna_log": urna, "membro": membro, "horario_local": quando,
+                                  "habilitacao": c.tipo(), "mesario": c.mesario if c.manual else None,
+                                  "tentativas_digital": c.tentativas,
+                                  "segundos_ciclo": int((quando - c.inicio).total_seconds()) if c.inicio else None})
+                    ciclos[urna] = Ciclo(None)
             k = (membro, urna, app, nivel, normaliza(msg))
-            m = msgs[k]
-            m[0] += 1
-            m[1] = m[1] or quando
-            m[2] = quando
+            m2 = msgs[k]
+            m2[0] += 1
+            m2[1] = m2[1] or quando
+            m2[2] = quando
             if nivel in ("ALERTA", "ERRO"):
                 alertas.append({**chave, "membro": membro, "urna_log": urna, "app": app, "nivel": nivel,
                                 "horario_local": quando, "mensagem": ID_LONGO.sub("<ID>", msg)})
     resumo = [{**chave, "membro": k[0], "urna_log": k[1], "app": k[2], "nivel": k[3], "mensagem": k[4],
                "n": v[0], "primeiro": v[1], "ultimo": v[2]} for k, v in msgs.items()]
-    return votos, resumo, alertas
+    mesarios = [{**chave, "mesario": a, **d} for a, d in mes.items()]
+    return votos, resumo, alertas, mesarios
 
 
 # ---------- orquestração ----------
 
-def processar_secao(zip_path: str, prefixo: str, nomes: list[str], turno: str) -> dict:
+TABELAS = ("secao", "bu_votos", "rdv_votos", "integridade", "log_votos", "log_msgs", "log_alertas",
+           "mesarios", "erros")
+K = [("turno", pa.int64()), ("uf", pa.string()), ("cd_municipio", pa.int64()), ("zona", pa.int64()),
+     ("secao", pa.int64()), ("prefixo", pa.string())]
+S, I, B, T = pa.string(), pa.int64(), pa.bool_(), pa.timestamp("us")
+SCHEMAS = {k: pa.schema(K + v) for k, v in {
+    "secao": [("fase", S), ("tipo_urna", S), ("tipo_arquivo", S), ("versao_votacao", S), ("nr_urna", I),
+              ("serie_fv", S), ("serie_fc", S), ("codigo_carga", S), ("data_carga", T), ("gerador_midia", S),
+              ("ident_urna", S), ("n_cargas_historico", I), ("abertura", T), ("encerramento", T),
+              ("emissao_bu", T), ("aptos", I), ("aptos_secao", I), ("aptos_tte", I), ("comparecimento", I),
+              ("habilitados_biometria", I), ("habilitados_biografia", I), ("sem_biometria", I)],
+    "bu_votos": [("id_eleicao", I), ("cargo", S), ("tipo_voto", S), ("numero", I), ("partido", I), ("votos", I)],
+    "rdv_votos": [("origem", S), ("id_eleicao", I), ("cargo", S), ("tipo_voto", S), ("digitado", S), ("votos", I)],
+    "integridade": [("arquivo", S), ("presente", B), ("ok_sw", B), ("ok_hw", B), ("lista_sw_ok", B),
+                    ("lista_hw_ok", B), ("alg_sw", S), ("alg_hw", S), ("erro", S)],
+    "log_votos": [("urna_log", S), ("membro", S), ("horario_local", T), ("habilitacao", S), ("mesario", S),
+                  ("tentativas_digital", I), ("segundos_ciclo", I)],
+    "log_msgs": [("membro", S), ("urna_log", S), ("app", S), ("nivel", S), ("mensagem", S), ("n", I),
+                 ("primeiro", T), ("ultimo", T)],
+    "log_alertas": [("membro", S), ("urna_log", S), ("app", S), ("nivel", S), ("horario_local", T), ("mensagem", S)],
+    "mesarios": [("mesario", S), ("habilitou", I), ("registrado", B), ("eleitor_da_secao", B), ("encerrou", B),
+                 ("primeiro", T), ("ultimo", T)],
+    "erros": [("etapa", S), ("erro", S)],
+}.items()}
+
+_zip = None
+
+
+def _abre(zip_path: str) -> None:
+    global _zip
+    _zip = zipfile.ZipFile(zip_path)
+
+
+def processar_secao(args) -> dict:
+    prefixo, nomes, turno = args
     m = re.match(r"o(\d{5})([a-z]{2})(\d{5})(\d{4})(\d{4})", prefixo)
     chave = {"turno": int(turno), "uf": m.group(2).upper(), "cd_municipio": int(m.group(3)),
              "zona": int(m.group(4)), "secao": int(m.group(5)), "prefixo": prefixo}
-    out = {k: [] for k in ("secao", "bu_votos", "rdv_votos", "integridade", "log_votos", "log_msgs",
-                           "log_alertas", "erros")}
-    with zipfile.ZipFile(zip_path) as z:
-        arquivos = {n: z.read(n) for n in nomes}
+    out = {k: [] for k in TABELAS}
+
     def tenta(nome, f):
         try:
             return f()
         except Exception as e:  # registra e segue: um arquivo ruim não derruba a UF
             out["erros"].append({**chave, "etapa": nome, "erro": f"{type(e).__name__}: {e}"[:500]})
             return None
-    por_tipo = {n.split("-", 1)[1]: d for n, d in arquivos.items()}
+
+    arquivos = {}
+    for n in nomes:
+        d = tenta(f"zip:{n}", lambda: _zip.read(n))
+        if d is not None:
+            arquivos[n] = d
+    # seções apuradas pelo Sistema de Apuração (cédula de papel) usam busa/logsa/sa.vsc
+    ALIAS = {"busa.dat": "bu.dat", "logsa.jez": "log.jez", "sa.vsc": "vota.vsc"}
+    por_tipo = {ALIAS.get(n.split("-", 1)[1], n.split("-", 1)[1]): d for n, d in arquivos.items()}
     if "bu.dat" in por_tipo:
         r = tenta("bu", lambda: ler_bu(por_tipo["bu.dat"], chave))
         if r:
@@ -264,13 +397,14 @@ def processar_secao(zip_path: str, prefixo: str, nomes: list[str], turno: str) -
             out["log_votos"] += r[0]
             out["log_msgs"] += r[1]
             out["log_alertas"] += r[2]
+            out["mesarios"] += r[3]
     for t in ("bu.dat", "rdv.dat", "log.jez", "vota.vsc"):
         if t not in por_tipo:
             out["erros"].append({**chave, "etapa": "arquivos", "erro": f"ausente: {t}"})
     return out
 
 
-def processar_zip(zip_path: Path, workers: int = 2) -> dict[str, int]:
+def processar_zip(zip_path: Path, workers: int = 2, lote: int = 2000) -> dict[str, int]:
     m = re.search(r"_(\d)t_([A-Z]{2})\.zip$", zip_path.name)
     turno, uf = m.group(1), m.group(2)
     grupos = defaultdict(list)
@@ -279,23 +413,42 @@ def processar_zip(zip_path: Path, workers: int = 2) -> dict[str, int]:
             mm = NOME.match(n)
             if mm:
                 grupos[mm.group(1)].append(n)
-    tabelas = defaultdict(list)
-    with ProcessPoolExecutor(workers) as pool:
-        futs = [pool.submit(processar_secao, str(zip_path), p, ns, turno) for p, ns in sorted(grupos.items())]
-        for i, f in enumerate(futs, 1):
-            for k, linhas in f.result().items():
-                tabelas[k] += linhas
-            if i % 2000 == 0:
-                print(f"  {uf} {turno}t: {i}/{len(futs)} seções", flush=True)
-    contagem = {"secoes_no_zip": len(grupos)}
-    for k, linhas in tabelas.items():
-        saida = LAKE / f"urna_{k}" / f"turno={turno}" / f"uf={uf}" / "part.parquet"
-        saida.parent.mkdir(parents=True, exist_ok=True)
-        if linhas:
-            pq.write_table(pa.Table.from_pylist(linhas), saida, compression="zstd")
-        elif saida.exists():
-            saida.unlink()
-        contagem[k] = len(linhas)
+    # grava em diretório temporário e troca no fim: uma falha no meio não deixa partição pela metade
+    tmp = {k: LAKE.parent / "tmp_lake" / f"urna_{k}" / f"turno={turno}" / f"uf={uf}" for k in TABELAS}
+    for d in tmp.values():
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+    writers = {k: pq.ParquetWriter(tmp[k] / "part.parquet", SCHEMAS[k], compression="zstd") for k in TABELAS}
+    contagem = {"secoes_no_zip": len(grupos), **{k: 0 for k in TABELAS}}
+    buf = {k: [] for k in TABELAS}
+
+    def descarrega():
+        for k, linhas in buf.items():
+            if linhas:
+                writers[k].write_table(pa.Table.from_pylist(linhas, schema=SCHEMAS[k]))
+                contagem[k] += len(linhas)
+                linhas.clear()
+
+    tarefas = [(p, ns, turno) for p, ns in sorted(grupos.items())]
+    try:
+        with ProcessPoolExecutor(workers, initializer=_abre, initargs=(str(zip_path),)) as pool:
+            for i, r in enumerate(pool.map(processar_secao, tarefas, chunksize=16), 1):
+                for k, linhas in r.items():
+                    buf[k] += linhas
+                if i % lote == 0:
+                    descarrega()
+                    print(f"  {uf} {turno}t: {i}/{len(tarefas)} seções", flush=True)
+        descarrega()
+    finally:
+        for w in writers.values():
+            w.close()
+    for k in TABELAS:
+        final = LAKE / f"urna_{k}" / f"turno={turno}" / f"uf={uf}"
+        if final.exists():
+            shutil.rmtree(final)
+        final.parent.mkdir(parents=True, exist_ok=True)
+        tmp[k].rename(final)
     return contagem
 
 

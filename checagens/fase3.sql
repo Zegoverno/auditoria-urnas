@@ -20,10 +20,12 @@ from integ group by all order by all;
 
 -- U2. Recontagem: RDV (voto a voto) = BU binário, por seção x cargo x votável
 -- No RDV, 'nuloAposSuspensao' (eleitor que não concluiu) entra no BU como nulo.
--- Chaves sem número usam -1 (NULL nunca casa em junção).
+-- Voto de legenda: o RDV guarda o que foi digitado (ex.: 1103 = partido 11 + candidato
+-- inexistente) e vale o partido, os 2 primeiros dígitos. Chaves sem número usam -1 (NULL nunca casa em junção).
 with r as (select turno, uf, prefixo, id_eleicao, cargo,
                   case when tipo_voto like 'nulo%' then 'nulo' else tipo_voto end tipo,
-                  case when tipo_voto in ('nominal','legenda') then try_cast(digitado as int) else -1 end numero,
+                  case when tipo_voto = 'nominal' then try_cast(digitado as int)
+                       when tipo_voto = 'legenda' then try_cast(left(digitado, 2) as int) else -1 end numero,
                   sum(votos) v
            from rdv group by all),
      b as (select turno, uf, prefixo, id_eleicao, cargo, tipo_voto tipo,
@@ -67,3 +69,17 @@ select 'U6 cobertura zip x CSV' checagem, coalesce(s.turno, c.turno) turno, coal
   count(*) filter (where s.prefixo is not null and c.secao is not null) ambos,
   count(*) filter (where c.secao is null) so_zip, count(*) filter (where s.prefixo is null) so_csv
 from sec s full join c using (turno, uf, cd_municipio, zona, secao) group by all order by all;
+
+-- U7. Forma de habilitação reconstruída do log (voto a voto) = detalhamento do BU, por seção
+create view mes as select * from read_parquet('data/lake/urna_mesarios/*/*/*.parquet');
+with l as (select turno, uf, prefixo,
+                  count(*) filter (where habilitacao = 'biometria') bio,
+                  count(*) filter (where habilitacao = 'manual_mesario') man,
+                  count(*) filter (where habilitacao = 'sem_biometria') sem,
+                  count(*) filter (where habilitacao = 'indeterminado') ind
+           from lv group by all)
+select 'U7 habilitação log = BU (biometria/manual/sem biometria)' checagem, s.turno, s.uf, count(*) secoes,
+  count(*) filter (where coalesce(l.bio,0) <> s.habilitados_biometria or coalesce(l.man,0) <> s.habilitados_biografia
+                      or coalesce(l.sem,0) <> s.sem_biometria) divergentes,
+  sum(l.ind) indeterminados, divergentes = 0 ok
+from sec s left join l using (turno, uf, prefixo) group by all order by all;

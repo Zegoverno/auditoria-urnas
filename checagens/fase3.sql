@@ -83,3 +83,25 @@ select 'U7 habilitação log = BU (biometria/manual/sem biometria)' checagem, s.
                       or coalesce(l.sem,0) <> s.sem_biometria) divergentes,
   sum(l.ind) indeterminados, divergentes = 0 ok
 from sec s left join l using (turno, uf, prefixo) group by all order by all;
+
+-- U4b. Diagnóstico das seções divergentes na U4: voto interrompido por desligamento/reinício da urna.
+-- Padrão visto (RN 1t, ES 1t): eleitor confirma o último cargo (Presidente), a urna desliga
+-- (queda de energia/bateria) antes de gravar "O voto do eleitor foi computado"; no reinício o voto
+-- é preservado e entra no BU/RDV (U2 ok), mas o log não tem a linha "computado".
+-- interrompidos = confirmações de Presidente + nulos por suspensão de Presidente - computados.
+create view lm as select * from read_parquet('data/lake/urna_log_msgs/*/*/*.parquet');
+with l as (select turno, uf, prefixo, count(*) n from lv group by all),
+     m as (select turno, uf, prefixo,
+                  sum(n) filter (where mensagem = 'Voto confirmado para [Presidente]')
+                + coalesce(sum(n) filter (where mensagem = 'Atribuido voto nulo por suspensão [Presidente]'), 0)
+                - coalesce(sum(n) filter (where mensagem = 'O voto do eleitor foi computado'), 0) interrompidos,
+                  coalesce(sum(n) filter (where mensagem = 'Mesário confirmou o reinício da votação'), 0) reinicios
+           from lm group by all),
+     d as (select s.turno, s.uf, s.prefixo, s.comparecimento - coalesce(l.n, 0) faltam_no_log, m.interrompidos, m.reinicios
+           from sec s left join l using (turno, uf, prefixo) left join m using (turno, uf, prefixo)
+           where coalesce(l.n, 0) <> s.comparecimento)
+select 'U4b divergências U4: voto interrompido por reinício' checagem, turno, uf, count(*) secoes,
+  sum(faltam_no_log) votos_faltando_no_log,
+  count(*) filter (where faltam_no_log = interrompidos and reinicios > 0) secoes_explicadas,
+  secoes_explicadas = secoes ok
+from d group by all order by all;

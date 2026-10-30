@@ -89,6 +89,9 @@ from sec s left join l using (turno, uf, prefixo) group by all order by all;
 -- (queda de energia/bateria) antes de gravar "O voto do eleitor foi computado"; no reinício o voto
 -- é preservado e entra no BU/RDV (U2 ok), mas o log não tem a linha "computado".
 -- interrompidos = confirmações de Presidente + nulos por suspensão de Presidente - computados.
+-- Segundo padrão (ES 2t, seção 0085): urna de contingência reutilizada para recuperar duas seções.
+-- O log.jez da segunda traz, aninhado, o log da urna da primeira (mesmo membro/urna_log em outra
+-- seção); esses votos "alheios" sobram no log. Explicada se excluí-los fecha com o comparecimento.
 create view lm as select * from read_parquet('data/lake/urna_log_msgs/*/*/*.parquet');
 with l as (select turno, uf, prefixo, count(*) n from lv group by all),
      m as (select turno, uf, prefixo,
@@ -97,11 +100,19 @@ with l as (select turno, uf, prefixo, count(*) n from lv group by all),
                 - coalesce(sum(n) filter (where mensagem = 'O voto do eleitor foi computado'), 0) interrompidos,
                   coalesce(sum(n) filter (where mensagem = 'Mesário confirmou o reinício da votação'), 0) reinicios
            from lm group by all),
-     d as (select s.turno, s.uf, s.prefixo, s.comparecimento - coalesce(l.n, 0) faltam_no_log, m.interrompidos, m.reinicios
-           from sec s left join l using (turno, uf, prefixo) left join m using (turno, uf, prefixo)
-           where coalesce(l.n, 0) <> s.comparecimento)
-select 'U4b divergências U4: voto interrompido por reinício' checagem, turno, uf, count(*) secoes,
+     d0 as (select s.turno, s.uf, s.prefixo, s.comparecimento - coalesce(l.n, 0) faltam_no_log
+            from sec s left join l using (turno, uf, prefixo) where coalesce(l.n, 0) <> s.comparecimento),
+     g as (select turno, uf, prefixo, urna_log, membro, count(*) n from lv
+           where (turno, uf, prefixo) in (select (turno, uf, prefixo) from d0) group by all),
+     a as (select turno, uf, prefixo, sum(n) alheios from g
+           where exists (select 1 from lv x where x.turno = g.turno and x.uf = g.uf and x.urna_log = g.urna_log
+                                             and x.membro = g.membro and x.prefixo <> g.prefixo)
+           group by all),
+     d as (select d0.*, m.interrompidos, m.reinicios, coalesce(a.alheios, 0) alheios
+           from d0 left join m using (turno, uf, prefixo) left join a using (turno, uf, prefixo))
+select 'U4b divergências U4: voto interrompido / log alheio' checagem, turno, uf, count(*) secoes,
   sum(faltam_no_log) votos_faltando_no_log,
-  count(*) filter (where faltam_no_log = interrompidos and reinicios > 0) secoes_explicadas,
-  secoes_explicadas = secoes ok
+  count(*) filter (where faltam_no_log = interrompidos and reinicios > 0) secoes_interrompidas,
+  count(*) filter (where alheios > 0 and faltam_no_log = -alheios) secoes_log_alheio,
+  secoes_interrompidas + secoes_log_alheio = secoes ok
 from d group by all order by all;

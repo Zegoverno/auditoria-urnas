@@ -121,13 +121,20 @@ def ler_bu(dados: bytes, chave: dict) -> tuple[dict, list[dict]]:
                     votos.append({
                         **chave,
                         "id_eleicao": el["idEleicao"],
-                        "cargo": tc["codigoCargo"][1],
+                        "cargo": nome_cargo(tc["codigoCargo"]),
                         "tipo_voto": vv["tipoVoto"],
                         "numero": iv.get("codigo"),
                         "partido": iv.get("partido"),
                         "votos": vv["quantidadeVotos"],
                     })
     return secao, votos
+
+
+def nome_cargo(cod: tuple) -> str:
+    """CHOICE cargoConstitucional (enum, já texto) ou numeroCargoConsultaLivre (inteiro 25..99,
+    consultas/plebiscitos locais, ex.: MT 2t eleição 6288 cargo 26) -> 'consulta_26'."""
+    tipo, valor = cod
+    return valor if isinstance(valor, str) else f"consulta_{valor}"
 
 
 # ---------- RDV ----------
@@ -139,7 +146,7 @@ def ler_rdv(dados: bytes, chave: dict) -> list[dict]:
     for el in eleicoes:
         for vc in el["votosCargos"]:
             for v in vc["votos"]:
-                cont[(el["idEleicao"], vc["idCargo"][1], v["tipoVoto"], v.get("digitacao"))] += 1
+                cont[(el["idEleicao"], nome_cargo(vc["idCargo"]), v["tipoVoto"], v.get("digitacao"))] += 1
     return [
         {**chave, "origem": tipo, "id_eleicao": e, "cargo": c, "tipo_voto": t, "digitado": d, "votos": n}
         for (e, c, t, d), n in cont.items()

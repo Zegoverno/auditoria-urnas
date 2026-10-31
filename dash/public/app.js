@@ -102,6 +102,7 @@ const mapa = new deck.DeckGL({
   initialViewState: { longitude: -53, latitude: -14.5, zoom: 3.4, pitch: 0, bearing: 0 },
   getTooltip: ({ object }) => object && dica(object),
   onClick: ({ object }) => object && clique(object),
+  onViewStateChange: ({ viewState: v }) => { vista = { longitude: v.longitude, latitude: v.latitude, zoom: v.zoom }; },
 });
 let vista = { longitude: -53, latitude: -14.5, zoom: 3.4 };
 
@@ -112,6 +113,12 @@ function voar(bbox, pitch) {
   vista = { longitude, latitude, zoom: Math.min(zoom, 16) };
   mapa.setProps({ initialViewState: { ...vista, pitch: pitch ?? (E.modo === "colunas" ? 45 : 0), bearing: 0,
     transitionDuration: 700, transitionInterpolator: new deck.FlyToInterpolator() } });
+}
+function voarPonto(pos) {
+  if (!pos || !pos[0]) return;
+  vista = { longitude: pos[0], latitude: pos[1], zoom: Math.max(vista.zoom, 14) };
+  mapa.setProps({ initialViewState: { ...vista, pitch: 0, bearing: 0, transitionDuration: 700,
+    transitionInterpolator: new deck.FlyToInterpolator() } });
 }
 function bboxDe(geo) {
   let a = [180, 90, -180, -90];
@@ -184,9 +191,12 @@ function camadas() {
     const maxA = Math.max(1, ...regs.map(r => r.t2?.aptos || 0));
     out.push(new deck.ScatterplotLayer({
       id: "locais", data: regs, pickable: true, stroked: true,
-      getPosition: r => r.pos, getRadius: r => raio * (0.5 + 1.6 * Math.sqrt((r.t2?.aptos || 0) / maxA)),
-      getFillColor: r => [...corDe(r), 235], getLineColor: [10, 10, 10, 200], lineWidthMinPixels: 0.5,
-      updateTriggers: { getFillColor: [E.modo, E.turno] },
+      radiusUnits: "pixels", lineWidthUnits: "pixels",
+      getPosition: r => r.pos, getRadius: r => 3 + 9 * Math.sqrt((r.t2?.aptos || 0) / maxA),
+      getFillColor: r => [...corDe(r), 235],
+      getLineColor: r => r.id === E.local ? [255, 255, 255, 255] : [10, 10, 10, 200],
+      getLineWidth: r => r.id === E.local ? 3 : 0.5,
+      updateTriggers: { getFillColor: [E.modo, E.turno], getLineColor: [E.local], getLineWidth: [E.local] },
     }));
   }
   out.push(rotulos);
@@ -212,7 +222,7 @@ function clique(o) {
   const r = o.reg || o.properties?.reg || o;
   if (r.tipo === "uf") irUF(r.id);
   else if (r.tipo === "mun") irMun(r.id);
-  else if (r.tipo === "local") { E.local = r.id; painel(); }
+  else if (r.tipo === "local") { E.local = r.id; desenha(); }
 }
 
 // ---------- navegação ----------
@@ -286,7 +296,7 @@ function entidade() {
 function filhos() {
   if (E.nivel === "BR") return Object.entries(D.uf).map(([uf, v]) => ({ id: uf, nome: UF_NOME[uf], ...v, ir: () => irUF(uf) }));
   if (E.nivel === "UF") return Object.entries(D.mun[E.uf]).map(([cd, v]) => ({ id: cd, ...v, ir: () => irMun(cd) }));
-  if (E.local == null) return locaisDe(E.mun).map(l => ({ ...l, ir: () => { E.local = l.id; trilha(); painel(); } }));
+  if (E.local == null) return locaisDe(E.mun).map(l => ({ ...l, ir: () => { E.local = l.id; voarPonto(l.pos); desenha(); } }));
   return null;
 }
 

@@ -49,7 +49,7 @@ def fila_inicial() -> list[dict]:
     q = """select url, bytes from 'data/inventario.csv'
            where url like '%arqurnatot/bu_imgbu_logjez_rdv_vscmr_2026_%.zip' order by bytes"""
     itens = []
-    for url, tamanho in duckdb.execute(q).fetchall():
+    for url, tamanho in conectar().execute(q).fetchall():
         m = re.search(r"_(\d)t_([A-Z]{2})\.zip$", url)
         itens.append({"url": url, "bytes": int(tamanho), "turno": m[1], "uf": m[2], "tentativa": 0})
     return itens
@@ -132,11 +132,23 @@ class Prefetch(threading.Thread):
 
 # ---------- checagens só da UF/turno ----------
 
+# Sem limite, o DuckDB usa até 80% da RAM; nas UFs grandes (SP 1t: BU CSV de 742 MB + ~30 mi de
+# votos do log) isso derrubou a VM em 2026-10-30. Limite fixo e transbordo em disco.
+DUCK_MEMORIA = "2GB"
+DUCK_TMP = Path("data/tmp/duckdb")
+
+
+def conectar() -> duckdb.DuckDBPyConnection:
+    DUCK_TMP.mkdir(parents=True, exist_ok=True)
+    return duckdb.connect(config={"memory_limit": DUCK_MEMORIA, "threads": 2,
+                                  "temp_directory": str(DUCK_TMP), "preserve_insertion_order": False})
+
+
 def checar(turno: str, uf: str) -> tuple[bool, str, list[str]]:
     sql = SQL.read_text()
     sql = re.sub(r"data/lake/(urna_\w+)/\*/\*/\*\.parquet", rf"data/lake/\1/turno={turno}/uf={uf}/*.parquet", sql)
     sql = sql.replace("data/lake/bu/*/*/bu.parquet", f"data/lake/bu/turno={turno}/uf={uf}/bu.parquet")
-    con = duckdb.connect()
+    con = conectar()
     resumo, ok, prefixos = [], True, []
     sql = "\n".join(l for l in sql.splitlines() if not l.strip().startswith("--"))
     for corpo in [s.strip() for s in sql.split(";")]:

@@ -118,3 +118,9 @@ select 'U4b divergências U4: voto interrompido / log alheio' checagem, turno, u
   count(*) filter (where alheios > 0 and faltam_no_log = -alheios) secoes_log_alheio,
   secoes_interrompidas + secoes_log_alheio = secoes ok
 from d group by all order by all;
+
+-- U8. Nenhum voto do log antes da abertura ou depois do encerramento da urna (ambos em hora local)
+with u as (select turno, uf, prefixo, min(horario_local) primeiro, max(horario_local) ultimo from lv group by all)
+select 'U8 votos dentro de abertura–encerramento' checagem, s.turno, s.uf, count(*) secoes,
+  count(*) filter (where u.primeiro < s.abertura or u.ultimo > s.encerramento) fora, fora = 0 ok
+from sec s join u using (turno, uf, prefixo) group by all order by all;

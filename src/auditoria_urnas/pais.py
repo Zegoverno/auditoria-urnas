@@ -9,7 +9,7 @@ até MAX_TENTATIVAS. Divergência nas checagens não é falha de execução: é
 achado, fica registrada e a fila segue.
 
 Estado em data/fase3_status.csv (retomável: o que está ok é pulado).
-Uso: python -m auditoria_urnas.pais [--so UF_T ...]
+Uso: python -m auditoria_urnas.pais [--assinatura] [--so UF_T ...]
 """
 
 import csv
@@ -198,6 +198,12 @@ def guardar(zip_path: Path, prefixos: list[str], uf: str, turno: str) -> None:
 # ---------- laço ----------
 
 def main() -> None:
+    global STATUS, checar
+    proc = urnas.processar_zip
+    if "--assinatura" in sys.argv:  # Fase 3b: só a assinatura de hardware (assinatura.py)
+        from auditoria_urnas import assinatura
+        STATUS, checar, proc = Path("data/fase3b_status.csv"), assinatura.checar, assinatura.processar_zip
+        sys.argv.remove("--assinatura")
     so = set(sys.argv[sys.argv.index("--so") + 1:]) if "--so" in sys.argv else None
     feitos = ja_ok()
     fila = deque(i for i in fila_inicial()
@@ -220,7 +226,7 @@ def main() -> None:
             caminho = pre.caminho
             pre = Prefetch(fila[0]) if fila else None  # baixa o próximo enquanto processa este
             log(f"{uf} {turno}t: processando")
-            cont = urnas.processar_zip(caminho)
+            cont = proc(caminho)
             if cont["secao"] == 0:
                 raise RuntimeError(f"nenhuma seção lida: {cont}")
             ok, resumo, prefixos = checar(turno, uf)

@@ -142,7 +142,7 @@ function regioes() {
 }
 function centro(f) { const b = bboxDe(f); return [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2]; }
 function locaisDe(cd) {
-  return (D.secoes[cd] || []).map(l => ({ tipo: "local", id: l.nr, nome: l.nome, bairro: l.bairro, lat: l.lat, lon: l.lon,
+  return (D.secoes[cd] || []).map(l => ({ tipo: "local", id: l.zona + "-" + l.nr, nome: l.nome, bairro: l.bairro, lat: l.lat, lon: l.lon,
     pos: [l.lon, l.lat], secoes: l.secoes, t1: soma(l.secoes, "t1"), t2: soma(l.secoes, "t2") }));
 }
 
@@ -254,7 +254,7 @@ function trilha() {
   const p = [`<a data-ir="BR">Brasil</a>`];
   if (E.uf) p.push(`<a data-ir="UF">${UF_NOME[E.uf]}</a>`);
   if (E.mun) p.push(`<a data-ir="MUN">${D.mun[E.uf][E.mun]?.nome || E.mun}</a>`);
-  if (E.local != null) { const l = D.secoes[E.mun].find(x => x.nr === E.local); p.push(`<span>${l?.nome || "local"}</span>`); }
+  if (E.local != null) { const l = D.secoes[E.mun].find(x => x.zona + "-" + x.nr === E.local); p.push(`<span>${l?.nome || "local"}</span>`); }
   const el = document.getElementById("trilha");
   el.innerHTML = p.join('<span class="sep">›</span>');
   el.querySelectorAll("a").forEach(a => a.onclick = () => {

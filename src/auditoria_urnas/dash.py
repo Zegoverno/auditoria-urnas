@@ -294,7 +294,7 @@ def main() -> None:
         if (uf, cd) != cur:
             grava()
             cur, buf = (uf, cd), {}
-        loc = buf.setdefault(nr, {"nr": nr, "nome": (nm or "").title(), "bairro": (bairro or "").title(),
+        loc = buf.setdefault((zona, nr), {"zona": zona, "nr": nr, "nome": (nm or "").title(), "bairro": (bairro or "").title(),
                                   "lat": lat, "lon": lon, "secoes": {}})
         s = loc["secoes"].setdefault(f"{zona}/{secao}", {"zona": zona, "secao": secao})
         d = {k: int(v or 0) for k, v in zip(CAMPOS[:-3], vals[:-2])}

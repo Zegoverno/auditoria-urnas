@@ -354,7 +354,7 @@ function candidatos1(t) {
 function selos(e) {
   const t = e.t2 || e.t1 || {}, t1 = e.t1 || {};
   const div = (t.log_div || 0) + (t1.log_div || 0);
-  return `<div><span class="selo">hashes conferidos com a lista assinada</span><span class="selo">RDV = BU</span>
+  return `<div><span class="selo">assinatura digital verificada (998.414 de 998.414)</span><span class="selo">RDV = BU</span>
     <span class="selo ${div ? "alerta" : ""}">log = comparecimento${div ? ` (exceto ${div} seç.)` : ""}</span>
     ${(t.contingencia || 0) + (t1.contingencia || 0) ? `<span class="selo alerta">${(t1.contingencia || 0) + (t.contingencia || 0)} urnas de contingência</span>` : ""}</div>`;
 }

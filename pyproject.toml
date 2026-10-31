@@ -10,6 +10,8 @@ dependencies = [
     "httpx>=0.28.1",
     "py7zr>=1.1.4",
     "pyarrow>=26.0.0",
+    "scipy>=1.18.1",
+    "shapely>=2.2.0",
 ]
 
 [project.scripts]

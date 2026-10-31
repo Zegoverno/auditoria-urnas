@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditoria das urnas 2026 · Presidente</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://unpkg.com/deck.gl@9.1.14/dist.min.js"></script>
+<script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://unpkg.com/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="titulo">
+    <b>Auditoria das urnas 2026</b> <span class="sub">Presidente · dados do TSE verificados urna a urna</span>
+  </div>
+  <nav id="trilha"></nav>
+  <div class="controles">
+    <div class="grupo" id="modos">
+      <button data-modo="vencedor" class="on">Vencedor</button>
+      <button data-modo="colunas">Colunas</button>
+      <button data-modo="crescimento">Crescimento 1º→2º</button>
+    </div>
+    <div class="grupo" id="turnos">
+      <button data-turno="1">1º turno</button>
+      <button data-turno="2" class="on">2º turno</button>
+    </div>
+    <div class="grupo" id="escala" hidden>
+      <button data-escala="votos" class="on">Votos</button>
+      <button data-escala="pct">% válidos</button>
+    </div>
+  </div>
+</header>
+<main>
+  <section id="mapa"><div id="legenda"></div><div id="carregando" hidden>carregando…</div></section>
+  <aside id="painel"></aside>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

@@ -44,6 +44,11 @@ function mistura(c, a) { // escurece rumo ao fundo conforme a intensidade a ∈ 
 // ---------- métricas por modo ----------
 function corDe(reg) {
   const t1 = reg.t1, t2 = reg.t2;
+  if (E.modo === "abstencao") {
+    if (!t1 || !t2) return [60, 60, 60];
+    const d = dAbst(reg);                  // variação da abstenção, em fração dos aptos
+    return mistura(d <= 0 ? COR_ABST.cai : COR_ABST.sobe, Math.abs(d) / ESCALA_ABST);
+  }
   if (E.modo === "crescimento") {
     if (!t1 || !t2) return [60, 60, 60];
     const dl = t2.v13 - t1.v13, df = t2.v22 - t1.v22, base = Math.max(t2.aptos, 1);
@@ -57,16 +62,28 @@ function corDe(reg) {
   const margem = v ? (sorted[0] - sorted[1]) / v : 0;
   return mistura(COR[w], margem / 0.5);
 }
-let ESCALA_CRESC = 0.15;
+let ESCALA_CRESC = 0.15, ESCALA_ABST = 0.03;
+const COR_ABST = { cai: [52, 196, 140], sobe: [236, 140, 56] };
+const abst = t => 1 - t.comp / Math.max(t.aptos, 1);
+const dAbst = r => r.t1 && r.t2 ? abst(r.t2) - abst(r.t1) : 0;
 function ajustaEscala(regs) { // 90º percentil de |Δ| entre as regiões visíveis: usa a faixa toda de cor
   const v = regs.filter(r => r.t1 && r.t2).map(r => Math.abs((r.t2.v13 - r.t1.v13) - (r.t2.v22 - r.t1.v22)) / Math.max(r.t2.aptos, 1))
     .sort((a, b) => a - b);
   ESCALA_CRESC = Math.max(v.length ? v[Math.floor(0.9 * (v.length - 1))] : 0.15, 0.005);
+  const a = regs.filter(r => r.t1 && r.t2 && r.t2.aptos > 0).map(r => Math.abs(dAbst(r))).sort((x, y) => x - y);
+  ESCALA_ABST = Math.max(a.length ? a[Math.floor(0.9 * (a.length - 1))] : 0.03, 0.005);
 }
 function legenda() {
   const el = document.getElementById("legenda");
   const p = x => (100 * x).toFixed(1).replace(".", ",") + "%";
-  if (E.modo === "crescimento") {
+  if (E.modo === "abstencao") {
+    const pp_ = x => (100 * x).toFixed(1).replace(".", ",");
+    el.innerHTML = `<b>Variação da abstenção do 1º para o 2º turno</b>
+      <div class="barra" style="background:linear-gradient(90deg,rgb(${COR_ABST.cai}),#1c1f26,rgb(${COR_ABST.sobe}))"></div>
+      <div class="ext"><span>caiu ${pp_(ESCALA_ABST)} p.p.</span><span>igual</span><span>subiu ${pp_(ESCALA_ABST)} p.p.</span></div>
+      <div class="nota">Verde = mais gente foi votar no 2º turno. Escala ajustada às regiões visíveis.
+      Queda de abstenção não diz para quem foram esses votos: veja o Δ Lula/Δ Flávio e o fluxo.</div>`;
+  } else if (E.modo === "crescimento") {
     el.innerHTML = `<b>Quem mais cresceu do 1º para o 2º turno</b>
       <div class="barra" style="background:linear-gradient(90deg,${HEX["22"]},#1c1f26,${HEX["13"]})"></div>
       <div class="ext"><span>Flávio +${p(ESCALA_CRESC)}</span><span>empate</span><span>Lula +${p(ESCALA_CRESC)}</span></div>
@@ -213,7 +230,8 @@ function dica(o) {
     <b style="color:${HEX["22"]}">Flávio ${pct(t.v22, validos(t))}</b></div>` : "";
   const nome = r.tipo === "local" ? `${r.nome}<div class="nota">${r.bairro || ""} · ${r.secoes.length} seções</div>` : r.nome;
   let extra = "";
-  if (t1 && t2) extra = `<div class="nota">Δ Lula ${sinal(t2.v13 - t1.v13)} · Δ Flávio ${sinal(t2.v22 - t1.v22)}</div>`;
+  if (t1 && t2) extra = `<div class="nota">Δ Lula ${sinal(t2.v13 - t1.v13)} · Δ Flávio ${sinal(t2.v22 - t1.v22)}</div>
+    <div class="nota">Abstenção ${pct(t1.aptos - t1.comp, t1.aptos)} → ${pct(t2.aptos - t2.comp, t2.aptos)} (${pp(100 * dAbst({ t1, t2 }))}) · comparecimento ${sinal(t2.comp - t1.comp)}</div>`;
   return { html: `<b>${nome}</b>${linha(t1, "1º")}${linha(t2, "2º")}${extra}`,
     style: { background: "#171a21", color: "#e6e8ec", border: "1px solid #262a33", borderRadius: "8px", fontSize: "12px", padding: "8px" } };
 }
@@ -273,12 +291,13 @@ function trilha() {
 function botoes() {
   document.querySelectorAll("#modos button").forEach(b => b.classList.toggle("on", b.dataset.modo === E.modo));
   document.querySelectorAll("#turnos button").forEach(b => { b.classList.toggle("on", +b.dataset.turno === E.turno);
-    b.disabled = E.modo === "crescimento"; });
+    b.disabled = E.modo === "crescimento" || E.modo === "abstencao"; });
   document.getElementById("escala").hidden = E.modo !== "colunas";
   document.querySelectorAll("#escala button").forEach(b => b.classList.toggle("on", b.dataset.escala === E.escala));
 }
 document.querySelectorAll("#modos button").forEach(b => b.onclick = () => {
   E.modo = b.dataset.modo;
+  if (E.modo === "abstencao") E.ordem = { col: "dabst", desc: false };
   mapa.setProps({ initialViewState: { ...vista, pitch: E.modo === "colunas" ? 45 : 0, bearing: 0, transitionDuration: 500 } });
   desenha(); });
 document.querySelectorAll("#turnos button").forEach(b => b.onclick = () => { E.turno = +b.dataset.turno; desenha(); });
@@ -370,6 +389,7 @@ function tabelaFilhos(fs) {
     dl: r => r.t1 && r.t2 ? (r.t2.v13 / Math.max(validos(r.t2), 1) - r.t1.v13 / Math.max(validos(r.t1), 1)) : 0,
     df: r => r.t1 && r.t2 ? (r.t2.v22 / Math.max(validos(r.t2), 1) - r.t1.v22 / Math.max(validos(r.t1), 1)) : 0,
     abst: r => r.t2 ? 1 - r.t2.comp / Math.max(r.t2.aptos, 1) : 0,
+    dabst: r => dAbst(r),
     man: r => r.t2 ? r.t2.man / Math.max(r.t2.comp, 1) : 0,
   };
   const f = col[E.ordem.col] || col.aptos;
@@ -378,11 +398,11 @@ function tabelaFilhos(fs) {
   const th = (c, n) => `<th data-col="${c}">${n}${E.ordem.col === c ? (E.ordem.desc ? " ▾" : " ▴") : ""}</th>`;
   const p = x => (100 * x).toFixed(1).replace(".", ",");
   const titulo = E.nivel === "BR" ? "Estados" : E.nivel === "UF" ? "Municípios" : "Locais de votação";
-  return `<h3>${titulo} <span class="nota">(2º turno; Δ em p.p. dos válidos vs 1º turno)</span></h3><table>
-    <tr>${th("nome", "Nome")}${th("aptos", "Aptos")}${th("lula", "Lula %")}${th("margem", "Margem")}${th("dl", "Δ Lula")}${th("df", "Δ Flávio")}${th("abst", "Abst.")}${th("man", "Mesário")}</tr>
+  return `<h3>${titulo} <span class="nota">(2º turno; Δ Lula/Flávio em p.p. dos válidos, Δ Abst. em p.p. dos aptos, vs 1º turno)</span></h3><table class="filhos">
+    <tr>${th("nome", "Nome")}${th("aptos", "Aptos")}${th("lula", "Lula %")}${th("margem", "Margem")}${th("dl", "Δ Lula")}${th("df", "Δ Flávio")}${th("abst", "Abst.")}${th("dabst", "Δ Abst.")}${th("man", "Mesário")}</tr>
     ${_filhos.map((r, i) => `<tr class="click" data-i="${i}"><td>${r.nome}${r.capital ? " ★" : ""}</td><td>${fmt(r.t2?.aptos)}</td>
       <td>${p(col.lula(r))}</td><td style="color:${col.margem(r) >= 0 ? HEX["13"] : HEX["22"]}">${p(Math.abs(col.margem(r)))}</td>
-      <td>${p(col.dl(r))}</td><td>${p(col.df(r))}</td><td>${p(col.abst(r))}</td><td>${(100 * col.man(r)).toFixed(2).replace(".", ",")}</td></tr>`).join("")}
+      <td>${p(col.dl(r))}</td><td>${p(col.df(r))}</td><td>${p(col.abst(r))}</td><td style="color:${col.dabst(r) <= 0 ? "#34c48c" : "#ec8c38"}">${(col.dabst(r) > 0 ? "+" : "") + p(col.dabst(r))}</td><td>${(100 * col.man(r)).toFixed(2).replace(".", ",")}</td></tr>`).join("")}
   </table>${fs.length > 400 ? `<div class="nota">Mostrando 400 de ${fmt(fs.length)}. Ordene pelas colunas.</div>` : ""}`;
 }
 function tabelaSecoes(ss) {

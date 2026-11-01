@@ -28,7 +28,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 from scipy.optimize import lsq_linear
-from shapely.geometry import mapping, shape
+from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 
 OUT = Path("dash/public/data")
 GEO = Path("data/raw/geo")
@@ -199,7 +199,7 @@ def geo(mapa_ibge: dict) -> dict:
     for f in mun["features"]:
         ibge = int(f["properties"]["id"])
         tse = ibge_tse.get(ibge)
-        g = shape(f["geometry"])
+        g = corrige_aneis(f["geometry"])
         if tse is None:
             continue
         centro[tse] = (round(g.representative_point().x, 4), round(g.representative_point().y, 4))
@@ -216,6 +216,23 @@ UF_IBGE = {"11": "RO", "12": "AC", "13": "AM", "14": "RR", "15": "PA", "16": "AP
            "22": "PI", "23": "CE", "24": "RN", "25": "PB", "26": "PE", "27": "AL", "28": "SE", "29": "BA",
            "31": "MG", "32": "ES", "33": "RJ", "35": "SP", "41": "PR", "42": "SC", "43": "RS", "50": "MS",
            "51": "MT", "52": "GO", "53": "DF"}
+
+
+def corrige_aneis(geom: dict):
+    """O geodata-br grava municípios com ilhas como um só Polygon cujo 1º anel pode ser uma ilha e o
+    contorno real vir depois, como se fosse buraco (43 municípios, entre eles o Rio). Remonta: anéis em
+    ordem de área; o que cai dentro de um contorno já aceito vira buraco dele, o resto vira polígono."""
+    polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
+    aneis = sorted((Polygon(r) for p in polys for r in p if len(r) >= 4), key=lambda a: -a.area)
+    contornos: list = []
+    for a in aneis:
+        dono = next((c for c in contornos if c[0].contains(a.representative_point())), None)
+        if dono and not any(b.contains(a.representative_point()) for b in dono[1:]):
+            dono.append(a)
+        else:
+            contornos.append([a])
+    g = MultiPolygon([Polygon(c[0].exterior, [b.exterior for b in c[1:]]) for c in contornos])
+    return g.buffer(0) if not g.is_valid else g
 
 
 def arred(g):

@@ -1,0 +1,55 @@
+:root {
+  --lula: #e0393e; --flavio: #2f6fde; --outros: #e3a33b; --bn: #8a8f98; --abst: #4a4f58;
+  --fundo: #0f1115; --card: #171a21; --linha: #262a33; --texto: #e6e8ec; --fraco: #9aa0aa;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 8px 14px;
+  border-bottom: 1px solid var(--linha); }
+.titulo b { font-size: 15px; } .sub { color: var(--fraco); font-size: 12px; margin-left: 6px; }
+#trilha { flex: 1; min-width: 200px; color: var(--fraco); }
+#trilha a { color: var(--texto); cursor: pointer; text-decoration: none; border-bottom: 1px dotted var(--fraco); }
+#trilha span.sep { margin: 0 6px; }
+.controles { display: flex; gap: 8px; flex-wrap: wrap; }
+.grupo { display: inline-flex; border: 1px solid var(--linha); border-radius: 8px; overflow: hidden; }
+.grupo[hidden] { display: none; }
+.grupo button { background: transparent; color: var(--fraco); border: 0; padding: 6px 10px; cursor: pointer; font: inherit; }
+.grupo button.on { background: #2a2f3a; color: var(--texto); }
+.grupo button:disabled { opacity: .35; cursor: default; }
+main { display: grid; grid-template-columns: 1fr 500px; height: calc(100% - 52px); }
+#mapa { position: relative; min-height: 360px; }
+#painel { overflow-y: auto; border-left: 1px solid var(--linha); padding: 12px 14px 40px; }
+#legenda { position: absolute; left: 10px; bottom: 10px; z-index: 2; background: rgba(15,17,21,.88);
+  border: 1px solid var(--linha); border-radius: 8px; padding: 8px 10px; font-size: 12px; width: 280px; }
+#legenda .ext span { font-size: 11px; }
+#legenda .barra { height: 10px; border-radius: 3px; margin: 4px 0; }
+#legenda .ext { display: flex; justify-content: space-between; color: var(--fraco); }
+#carregando { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3;
+  background: #222; padding: 4px 10px; border-radius: 6px; }
+h2 { font-size: 17px; margin: 2px 0 2px; } h3 { font-size: 13px; margin: 18px 0 6px; color: var(--fraco);
+  text-transform: uppercase; letter-spacing: .04em; }
+.nota { color: var(--fraco); font-size: 12px; }
+.placar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.cand { background: var(--card); border-radius: 10px; padding: 10px; border-top: 3px solid; }
+.cand .nome { font-size: 12px; color: var(--fraco); } .cand .pct { font-size: 22px; font-weight: 600; }
+.cand .det { font-size: 12px; color: var(--fraco); }
+.barra2 { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+td, th { padding: 4px 4px; border-bottom: 1px solid var(--linha); text-align: right; white-space: nowrap; }
+th { color: var(--fraco); font-weight: 500; font-size: 12px; cursor: pointer; user-select: none; }
+td:first-child, th:first-child { text-align: left; white-space: normal; }
+tr.click { cursor: pointer; } tr.click:hover td { background: #1c2028; }
+.pos { color: #7bd88f; } .neg { color: #ff7b7b; }
+.selo { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; margin: 2px 4px 0 0;
+  background: #1f3326; color: #7bd88f; } .selo.alerta { background: #3a2a1a; color: #f0b35a; }
+.cands1 .l { display: grid; grid-template-columns: 130px 1fr 60px; gap: 6px; align-items: center; font-size: 12px; margin: 2px 0; }
+.cands1 .b { height: 8px; border-radius: 3px; }
+#sankey svg { width: 100%; } #sankey text { fill: var(--texto); font-size: 10.5px; }
+.dica { position: absolute; z-index: 5; pointer-events: none; }
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
+  #mapa { height: 55vh; } #painel { border-left: 0; border-top: 1px solid var(--linha); }
+}
+table.filhos { font-size: 12px; } table.filhos td, table.filhos th { padding: 4px 3px; }
+table.filhos th { white-space: nowrap; }
